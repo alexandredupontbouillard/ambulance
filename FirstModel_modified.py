@@ -152,7 +152,7 @@ for iconj in range(len(tamaños_I)):
                 
                 # Other parameters #
                 #pi = 100
-                S= [S[0]]
+               
                 pi = np.amax(cli)/len(S) + 0.005
                 V = [1,2]
                     
