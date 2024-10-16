@@ -1,4 +1,4 @@
-from pyscipopt import Model, quicksum, multidict, SCIP_PARAMSETTING, Benders, Benderscut, SCIP_RESULT, SCIP_LPSOLSTAT
+from pyscipopt import Model, quicksum,Expr, multidict, SCIP_PARAMSETTING, Benders, Benderscut, SCIP_RESULT, SCIP_LPSOLSTAT
 
     
 import numpy as np
@@ -142,13 +142,13 @@ for iconj in range(len(tamaños_I)):
                             cli[l].append(0)
                             
                 #break
-               
-                # Other parameters #
-                #pi = 100
-                
-                pi = np.amax(cli)/len(S) + 0.005
+
+#                S = [S[0]]
+##                I = I[:71]
+#                L = L[:5]
+                pi = (np.amax(cli)/len(S) + 0.005)
                 V = [1,2]
-                    
+                #alpha_i= [100000 *  i for i in alpha_i]
                 ######################################################################
                 ######################    partialMP   ####################################
                 ######################################################################
@@ -157,17 +157,34 @@ for iconj in range(len(tamaños_I)):
                 partialMP = Model("CoverageMP")
                 partialMP.setParam('limits/time',timelim) #timelim
                 
+                varT = "I"
+                if(varT == "C"):
                 # Create variables #
-                x_vars = {"x(%s,%s)" %(l,k): partialMP.addVar(vtype="I",lb = 0, ub = eta[k-1], name="x(%s,%s)" %(l,k)) for l in L for k in K}                
+                    x_vars = {"x(%s,%s)" %(l,k): partialMP.addVar(vtype="I",lb = 0, ub = eta[k-1], name="x(%s,%s)" %(l,k)) for l in L for k in K}                
 
                 
-                # Add constraints
+                    # Add constraints
+                    
+                    boundOfNumberOflocatedAmbulance = {}
+                    for k in K:  #number of located ambulances cannot exceed
+                        boundOfNumberOflocatedAmbulance[k] = partialMP.addCons(quicksum(x_vars["x(%s,%s)" %(l,k)] for l in L) <= eta[k-1], "c2_"+str(k))
                 
-                boundOfNumberOflocatedAmbulance = {}
-                for k in K:  #number of located ambulances cannot exceed
-                    boundOfNumberOflocatedAmbulance[k] = partialMP.addCons(quicksum(x_vars["x(%s,%s)" %(l,k)] for l in L) <= eta[k-1], "c2_"+str(k))
-                
-                # Setup of benders
+                elif(varT == "I"):
+                    x_vars = {"x(%s,%s,%s)" %(l,k,n): partialMP.addVar(vtype="B", name="x(%s,%s,%s)" %(l,k,n)) for l in L for k in K for n in range(eta[k-1])}
+                    for k in K:
+                        sum2 = Expr()    
+                        for l in L:
+                            for n in range(eta[k-1]-1):
+                                partialMP.addCons( x_vars["x(%s,%s,%s)" %(l,k,n)] - x_vars["x(%s,%s,%s)" %(l,k,n+1)] <= 0 , "cI_(%s,%s,%s)" %(l,k,n))
+                                sum2+=x_vars["x(%s,%s,%s)" %(l,k,n)]
+                                partialMP.addCons(x_vars["x(%s,%s,%s)" %(l,k,n)] <=1)
+                                partialMP.addCons(-x_vars["x(%s,%s,%s)" %(l,k,n)] <=0)
+                            sum2 += x_vars["x(%s,%s,%s)" %(l,k,eta[k-1]-1)]
+
+                            partialMP.addCons(x_vars["x(%s,%s,%s)" %(l,k,eta[k-1]-1)] <=1)
+                            partialMP.addCons(-x_vars["x(%s,%s,%s)" %(l,k,eta[k-1]-1)] <=0)
+                        partialMP.addCons(sum2 <= eta[k-1],name =" boundOfNumberOflocatedAmbulance_(%s)"% (k))                                        
+                    # Setup of benders
 
                 partialMP.data = x_vars
 
@@ -177,14 +194,14 @@ for iconj in range(len(tamaños_I)):
                 partialMP.setBoolParam("misc/allowweakdualreds", False)
                 partialMP.setBoolParam("benders/copybenders", False)
                 partialMP.setBoolParam("benders/cutlpsol",True)
-                partialMP.setRealParam("benders/solutiontol",1e-4)
-                #partialMP.setBoolParam("benders/copybenders",True)
-
+                
+                
+                #partialMP.writeProblem(trans=False)
                 bendersName = "myBenders"
                 benderscutName = "myBendersCut"                
-                varT = "C"
+
                 
-                myBenders = Benders.ambulanceBenders(partialMP.data,I, L,S,K,cli,alpha_i,eta,pi,bendersName,varT)   # replace by "I" to have integer subproblems
+                myBenders = Benders.ambulanceBenders(partialMP.data,I, L,S,K,cli,alpha_i,eta,pi,bendersName,varT)   
                 #myBendersCut = Benders.AmbulanceBendersCut(I, L,S,K,cli,alpha_i,eta,pi,benderscutName,varT)
                 
                     
@@ -197,27 +214,29 @@ for iconj in range(len(tamaños_I)):
                 
                 partialMP.activateBenders(myBenders, len(S)) #len(S))
                 partialMP.setBoolParam("constraints/benders/active", True)
+                #partialMP.writeProblem(trans=False) 
                 partialMP.setBoolParam("constraints/benderslp/active", True)
-                #partialMP.setBoolParam("benders/myBenders/updateauxvarbound", False)
+                partialMP.setBoolParam("benders/myBenders/updateauxvarbound", False)
                 #partialMP.setIntParam("constraints/benderslp/proptiming",4)
-                #lowerBounds = { s :  -alpha_i[0] *sum(1 for i in range(len(I)) if (S[s][i-1][0] + S[s][i-1][1] > 0) )/len(S) for s in range(len(S))}
-                #print(lowerBounds)
-                #Is this necessary ?
+                lowerBounds = { s :  -alpha_i[0] *sum(1 for i in range(len(I)) if (S[s][i-1][0] + S[s][i-1][1] > 0) )/len(S) for s in range(len(S))}
                 #partialMP.updateBendersLowerbounds(lowerBounds, myBenders)
 
+                partialMP.writeProblem(trans=False) 
+             
                 partialMP.optimize()
-                
-                
-                x_value={}
-                for l in L:
-                    for k in K:
-                        x_value[l,k] = partialMP.getVal(x_vars["x(%s,%s)" %(l,k)])
-                        print("(%s,%s) : %s" % (l,k,x_value[l,k]))
 
+                if(varT == "C"):
+                    bestsol = partialMP.getBestSol()
+                    x_value={}
+                    for l in L:
+                        for k in K:
+                    
+                            x_value[l,k] = partialMP.getVal(x_vars["x(%s,%s)" %(l,k)])
+                            print("(%s,%s) : %s" % (l,k,x_value[l,k]))
+                       
+                    print(myBenders.EvaluateForReal(x_value))
+##                 
 
-#                 
-                #partialMP.writeProblem(trans=True) 
-                
                 
                 #partialMP.setupBendersSubproblem(0, myBenders, partialMP.getBestSol())
                 
@@ -227,7 +246,7 @@ for iconj in range(len(tamaños_I)):
                 #myBenders.freeBendersSubproblems()  
                 #myBenders.subproblems[0].writeProblem(trans=True)            
                 #partialMP.printStatistics()   
-                partialMP.freeBendersSubproblems()
+                #partialMP.freeBendersSubproblems()
                 
                     
                     

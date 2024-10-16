@@ -5,7 +5,7 @@ def print_Cons(cons):
      tt = ""
      for key, ob in cons.expr.terms.items():
           tt += str(round(ob,4)) + str(key.vartuple[0]) + " + " 
-     print(tt + " >=  " + str(cons._rhs))
+     print(tt + " >=  " + str(cons._lhs))
 
 class ambulanceBenders(Benders):
 
@@ -33,6 +33,7 @@ class ambulanceBenders(Benders):
           self.upperbounds = [{}]*len(S)
           self.lowerbounds = [{}]*len(S)
           self.x_vars = [{}] * len(S)
+          self.reinforcing = [{}] * len(S)
      
 ########################################################################## CREATE SUBPROBLEMS #####################################################
      def benderscreatesub(self, probnumber):
@@ -43,15 +44,26 @@ class ambulanceBenders(Benders):
           subprob.disablePropagation()
 
           #Variables
-          self.x_vars[probnumber] = {}
-          self.x_vars[probnumber] = {(0,l,k): subprob.addVar(vtype="I", name="x(%s,%s)" %(l,k)) for l in self.L for k in self.K}
-          for l in self.L:
-            for k in self.K:
-                self.upperbounds[probnumber][0,l,k] = subprob.addCons(self.x_vars[probnumber][0,l,k]<= self.eta[k-1])
-                self.lowerbounds[probnumber][0,l,k] = subprob.addCons(-self.x_vars[probnumber][0,l,k] <= 0)
-                
-          y_vars ={}
           
+          if(self.varT =="C"):
+              self.x_vars[probnumber] = {}
+              self.x_vars[probnumber] = {(0,l,k): subprob.addVar(vtype="I",lb=0, ub = self.eta[k-1], name="x(%s,%s)" %(l,k)) for l in self.L for k in self.K}
+              for l in self.L:
+                for k in self.K:
+                    self.upperbounds[probnumber][0,l,k] = subprob.addCons(self.x_vars[probnumber][0,l,k]<= self.eta[k-1])
+                    self.lowerbounds[probnumber][0,l,k] = subprob.addCons(-self.x_vars[probnumber][0,l,k] <= 0)
+          elif(self.varT=="I"):
+            
+            self.x_vars[probnumber] = {}
+            self.x_vars[probnumber] = {(0,l,k,n): subprob.addVar(vtype="B", name="x(%s,%s,%s)" %(l,k,n)) for l in self.L for k in self.K for n in range(self.eta[k-1])}
+            for l in self.L:
+                for k in self.K:
+                    for i in range(self.eta[k-1]):
+                        self.upperbounds[probnumber][0,l,k,i] = subprob.addCons(self.x_vars[probnumber][0,l,k,i]<= 1)
+                        self.lowerbounds[probnumber][0,l,k,i] = subprob.addCons(-self.x_vars[probnumber][0,l,k,i] <= 0)
+            
+          y_vars ={}
+          self.varT ="C" ############# TO REMOVE
           for l in self.L:
             for i in self.I:
                 if self.S[probnumber][i-1][0] != 0:
@@ -62,10 +74,12 @@ class ambulanceBenders(Benders):
           
           for l in self.L:
             for i in self.I:
-                for k in self.K:
-                    if(self.S[probnumber][i-1][0]  +  self.S[probnumber][i-1][1] > 0 ):
-                        self.upperbounds[probnumber][1,l,k,i] = subprob.addCons(y_vars[1,l,k,i] <= self.eta[0]+self.eta[1] )
-                        self.lowerbounds[probnumber][1,l,k,i] = subprob.addCons(-y_vars[1,l,k,i] <= 0 )                 
+                if(self.S[probnumber][i-1][0]  > 0 ):
+                        self.upperbounds[probnumber][1,l,1,i] = subprob.addCons(y_vars[1,l,1,i] <= self.eta[0] )
+                        self.lowerbounds[probnumber][1,l,1,i] = subprob.addCons(-y_vars[1,l,1,i] <= 0 )          
+                if(self.S[probnumber][i-1][0]+  self.S[probnumber][i-1][1] > 0):
+                        self.upperbounds[probnumber][1,l,2,i] = subprob.addCons(y_vars[1,l,2,i] <= self.eta[1] )
+                        self.lowerbounds[probnumber][1,l,2,i] = subprob.addCons(-y_vars[1,l,2,i] <= 0 )          
               
           f_vars = { (2,i) : subprob.addVar(vtype=self.varT , name="Total"+str('_')+str(i)+"_"+str(probnumber)) for i in self.I if (self.S[probnumber][i-1][0] + self.S[probnumber][i-1][1]) > 0}
           for i in self.I :
@@ -100,18 +114,32 @@ class ambulanceBenders(Benders):
             if (self.S[probnumber][i-1][0] + self.S[probnumber][i-1][1]) > 0:
                 self.upperbounds[probnumber][6,i]= subprob.addCons(gamma_vars[6,i]<=1)
                 self.lowerbounds[probnumber][6,i]= subprob.addCons(-gamma_vars[6,i] <= 0)
-          
+          self.varT ="I"
           #objective
           
           subprob.setObjective(quicksum((-self.alpha_i[0]*f_vars[2,i] - self.alpha_i[1]*g_vars[3,i] - self.alpha_i[2]*h_vars[4,i] - self.alpha_i[3]*w_vars[5,i] + self.pi*gamma_vars[6,i])/len(self.S)  for i in self.I if (self.S[probnumber][i-1][0] + self.S[probnumber][i-1][1]) > 0),"minimize")
           
-          ##Constraints   ######## Reduced cost 1
-          self.c_bound_on_location[probnumber]={}
-          for l in self.L:
-                self.c_bound_on_location[probnumber][l,1] = subprob.addCons(quicksum(y_vars[1,l,1,i] for i in self.I if self.S[probnumber][i-1][0]  != 0)  <= self.x_vars[probnumber][0,l,1], name="boundL_"+str(l)+"_"+str(1)+"_"+str(probnumber))
-                
-                self.c_bound_on_location[probnumber][l,2] = subprob.addCons(quicksum(y_vars[1,l,2,i] for i in self.I if self.S[probnumber][i-1][0] + self.S[probnumber][i-1][1] != 0)  <= self.x_vars[probnumber][0,l,2], name="boundL_"+str(l)+"_"+str(2)+"_"+str(probnumber))
           
+          
+          ##Constraints   ######## Reduced cost 1
+          if(self.varT =="C"): #In the case master problem variables are integer and we don't want to solve subproblems to integrality
+              self.c_bound_on_location[probnumber]={}
+              for l in self.L:
+                    self.c_bound_on_location[probnumber][l,1] = subprob.addCons(quicksum(y_vars[1,l,1,i] for i in self.I if self.S[probnumber][i-1][0]  != 0)  <= self.x_vars[probnumber][0,l,1], name="boundL_"+str(l)+"_"+str(1)+"_"+str(probnumber))
+                    
+                    self.c_bound_on_location[probnumber][l,2] = subprob.addCons(quicksum(y_vars[1,l,2,i] for i in self.I if self.S[probnumber][i-1][0] + self.S[probnumber][i-1][1] != 0)  <= self.x_vars[probnumber][0,l,2], name="boundL_"+str(l)+"_"+str(2)+"_"+str(probnumber))
+        
+          elif(self.varT =="I"): # In the case Master problem variables are binary
+              self.c_bound_on_location[probnumber]={}
+              for l in self.L:
+                    self.c_bound_on_location[probnumber][l,1] = subprob.addCons(quicksum(y_vars[1,l,1,i] for i in self.I if self.S[probnumber][i-1][0]  != 0) - quicksum(self.x_vars[probnumber][0,l,1,n] for n in range(self.eta[0]))  <= 0 , name="boundL_"+str(l)+"_"+str(1)+"_"+str(probnumber))
+                    
+                    self.c_bound_on_location[probnumber][l,2] = subprob.addCons(quicksum(y_vars[1,l,2,i] for i in self.I if self.S[probnumber][i-1][0] + self.S[probnumber][i-1][1] != 0) -quicksum(self.x_vars[probnumber][0,l,2,n] for n in range(self.eta[1]))  <= 0, name="boundL_"+str(l)+"_"+str(2)+"_"+str(probnumber))
+            
+            
+            
+            
+            
           #Total 
           self.c_total_1[probnumber] = {}
           for i in self.I:
@@ -228,10 +256,10 @@ class ambulanceBenders(Benders):
             sum_gamma = Expr()
             if self.S[probnumber][i-1][0] + self.S[probnumber][i-1][1] > 0:
                 if self.S[probnumber][i-1][0] != 0:
-                    sum_gamma -= quicksum(y_vars[1,l,1,i] + y_vars[1,l,2,i] for l in self.L)
+                    sum_gamma += quicksum(y_vars[1,l,1,i] + y_vars[1,l,2,i] for l in self.L)
                 elif self.S[probnumber][i-1][1] != 0:
-                    sum_gamma -= quicksum(y_vars[1,l,2,i] for l in self.L)
-                self.c_gamma[probnumber][i] = subprob.addCons(sum_gamma - gamma_vars[6,i] <= -1, "c_11_"+str(i) +"_"+ str(probnumber))
+                    sum_gamma += quicksum(y_vars[1,l,2,i] for l in self.L)
+                self.c_gamma[probnumber][i] = subprob.addCons(-sum_gamma - gamma_vars[6,i] <= -1, "c_11_"+str(i) +"_"+ str(probnumber))
 
           self.c_one[probnumber] = {}
           
@@ -240,6 +268,16 @@ class ambulanceBenders(Benders):
           for i in self.I:
             if (self.S[probnumber][i-1][0] + self.S[probnumber][i-1][1] > 0):
                 self.c_one[probnumber][i] = subprob.addCons(f_vars[2,i] + g_vars[3,i] + h_vars[4,i] + w_vars[5,i] + gamma_vars[6,i] <= 1, "c_12_"+str(i)+"_"+str(probnumber))
+                
+                
+          for i in self.I:
+            if self.S[probnumber][i-1][0] + self.S[probnumber][i-1][1] > 0:
+                self.reinforcing[probnumber][i,"g"] =subprob.addCons(g_vars[3,i] <= quicksum((1-self.cli[l-1][i-1])* y_vars[1,l,k,i]  for l in self.L for k in self.K))
+    
+          for i in self.I:
+            if self.S[probnumber][i-1][0] + self.S[probnumber][i-1][1] > 0:
+                self.reinforcing[probnumber][i,"w"] = subprob.addCons(w_vars[5,i] <= quicksum((1-self.cli[l-1][i-1])* y_vars[1,l,k,i]  for l in self.L for k in self.K))
+                    
 
           dic_x = {value.name : value for key,value in self.x_vars[probnumber].items() }
           dic_y = {value.name : value for key,value in y_vars.items()}
@@ -249,36 +287,24 @@ class ambulanceBenders(Benders):
           dic_w = {value.name : value for key,value in w_vars.items()}
           dic_gamma = {value.name : value for key , value in gamma_vars.items()}
           
-          #subprob.writeProblem()
+          #reinforcing constraints
+          
+          #self.reinforcing[probnumber]
+          
+          subprob.writeProblem("subproblem.cip")
+          
           
           
           
           subprob.data = dic_x| dic_y| dic_f| dic_g| dic_h| dic_w| dic_gamma
           self.model.addBendersSubproblem(self, subprob)
 
-          self.subproblems[probnumber] = subprob     #### THIS GUY MAY ACT WEIRD
+          self.subproblems[probnumber] = subprob    
 
 ############################################################################ GET VARIABLE #############################################################
 
      def bendersgetvar(self, variable, probnumber):  
-          #"x"+str(l)+"_"+"k"
-#          name = ""
-#          print(variable.name)
-#          if(variable.name[0] =="x"):
-#                name = (0,variable.name[1],variable.name[3])
-#          elif(variable.name[0] =="d"):
-#                name = (1,,)
-#          elif(variable.name[0] =="T" and variable.name[6] =="l"):
-#                name = (3,,)
-#          elif(variable.name[0] =="T"):
-#                name = (2,,)
-#          elif(variable.name[0] == "P" and  variable.name[8] =="l" ):
-#                name = (5,,)
-#          elif(variable.name[0] =="P"):
-#                name = (4,,)
-#          elif(variable.name[0] =="N"):
-#                name = (6,,)
-#          
+
 
           try:
                 if probnumber == -1:  # convert to master variable
@@ -287,20 +313,25 @@ class ambulanceBenders(Benders):
                      mapvar = self.subproblems[probnumber].data[variable.name]
                      
           except KeyError:
+                #print(variable.name)
                 mapvar = None
           return {"mappedvar": mapvar}
 
 ######################################################################## SOLVE SUBPROBLEMS ############################################################
+
+#     def benderssolversub(self,solution,probnumber):
+#        print("yo jai été call")
+     
+
      def benderssolvesubconvex(self, solution, probnumber, onlyconvex):
           result_dict = {}
-          
+          #print("######################## start solvesubconvex")
           self.model.setupBendersSubproblem(probnumber, self, solution) 
 
           self.subproblems[probnumber].solveProbingLP()
 
           subprob = self.model.getBendersSubproblem(probnumber, self)  
           #assert self.subproblems[probnumber].getObjVal() ==subprob.getObjVal()
-          
           #subprob.updateBendersLowerbounds( -self.pi * len(self.I), self)
           
           objective = subprob.infinity()
@@ -317,17 +348,36 @@ class ambulanceBenders(Benders):
 
               objective = self.subproblems[probnumber].infinity()
               result = SCIP_RESULT.UNBOUNDED
-         
+          
 
           result_dict["objective"] = objective
           result_dict["result"] = result
-
+          #print("######################## end solvesubconvex")
                                
           return result_dict
           
      def bendersfreesub(self, probnumber):
           if self.subproblems[probnumber].inProbing():
               self.subproblems[probnumber].endProbing()
+              
+     def EvaluateForReal(self,x_values):
+         
+         summ = 0
+         self.varT = "I"
+         
+         
+         for s in range(len(self.S)):
+            self.bendersfreesub(s)
+            self.benderscreatesub(s)
+            for k in self.K:
+                for l in self.L:
+                    self.subproblems[s].addCons( self.x_vars[s][0,l,k] == x_values[l,k],str(l)+" "+str(k))    
+
+            self.subproblems[s].optimize()
+           
+            summ+=self.subproblems[s].getPrimalbound()
+                
+         return summ
 
 
 
@@ -342,88 +392,56 @@ class AmbulanceBendersCut(Benderscut):
 
 
     def benderscutexec(self, solution, probnumber, enfotype):
+        
         subprob = self.model.getBendersSubproblem(probnumber, benders=self.benders)
         membersubprob = self.benders.subproblems[probnumber]
-        
+
         if self.model.checkBendersSubproblemOptimality(solution, probnumber, benders=self.benders):
             return {"result" : SCIP_RESULT.FEASIBLE}
       
 
-        Ax = Expr()
+      
+        
         linExpr = Expr()
         linExpr += self.model.getBendersAuxiliaryVar(probnumber,self.benders)
         
         
-#        
-#        ##RDC 1
-
-        optSub = 0
-        for key,value in self.benders.c_bound_on_location[probnumber].items():
-            optSub+= subprob.getDualsolLinear(value) * subprob.getLhs(value)
-        print( "1 "+ str(optSub))
-        for key,value in self.benders.c_total_1[probnumber].items():
-            optSub+= subprob.getDualsolLinear(value) * subprob.getRhs(value)
-        print( "2 "+ str(optSub))
-        for key,value in self.benders.c_total_2[probnumber].items():
-            optSub+= subprob.getDualsolLinear(value) * subprob.getRhs(value)
-        print( "3 "+ str(optSub))
-        for key,value in self.benders.c_total_late_1[probnumber].items():
-            optSub+= subprob.getDualsolLinear(value) * subprob.getRhs(value)
-        print( "4 "+ str(optSub))
-        for key,value in self.benders.c_total_late_2[probnumber].items():
-            optSub+= subprob.getDualsolLinear(value) * subprob.getRhs(value)
-        print( "5 "+ str(optSub))
-        for key,value in self.benders.c_partial_1[probnumber].items():
-            optSub+= subprob.getDualsolLinear(value) * subprob.getRhs(value)
-        print( "6 "+ str(optSub))        
-        for key,value in self.benders.c_partial_2[probnumber].items():
-            optSub+= subprob.getDualsolLinear(value) * subprob.getRhs(value)
-        print( "7"+ str(optSub))
-        for key,value in self.benders.c_partial_3[probnumber].items():
-            optSub+= subprob.getDualsolLinear(value) * subprob.getRhs(value)
-        print( "8 "+ str(optSub))        
-        for key,value in self.benders.c_partial_late_1[probnumber].items():
-            optSub+= subprob.getDualsolLinear(value) * subprob.getRhs(value)
-        print( "9 "+ str(optSub))        
-        for key,value in self.benders.c_partial_late_2[probnumber].items():
-            optSub+= subprob.getDualsolLinear(value) * subprob.getRhs(value)
-        print( "10 "+ str(optSub))        
-        for key,value in self.benders.c_gamma[probnumber].items():
-            optSub+= subprob.getDualsolLinear(value) * subprob.getRhs(value)
-        print( "11 "+ str(optSub))
-        for key,value in self.benders.c_one[probnumber].items():
-            optSub+= subprob.getDualsolLinear(value) * subprob.getRhs(value)
-        print( "12 "+ str(optSub))
-        for key,value in self.benders.upperbounds[probnumber].items():
-            if(key[0] != 0):
-                optSub+= subprob.getDualsolLinear(value) * subprob.getRhs(value)
-        print( "13 "+ str(optSub))
-        for key,value in self.benders.lowerbounds[probnumber].items():
-            if(key[0] != 0):
-                optSub+= subprob.getDualsolLinear(value) * subprob.getLhs(value)
-        print( "14 "+ str(optSub))
-        
-
-        
-        
-        uAx = 0
-        
+        uAxetoile = 0
+        uAx = Expr()
         #x variables bounds
         for l in self.L:
             for k in self.K:
-                Ax+=-subprob.getDualsolLinear(self.benders.upperbounds[probnumber][0,l,k])*self.model.getBendersVar(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k].name],self.benders)
-                Ax+=subprob.getDualsolLinear(self.benders.lowerbounds[probnumber][0,l,k])*self.model.getBendersVar(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k].name],self.benders)
-                Ax+=subprob.getDualsolLinear(self.benders.c_bound_on_location[probnumber][l,k]) * self.model.getBendersVar(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k].name],self.benders)
+                if(self.benders.varT =="C"):
+                    uAx+=subprob.getDualsolLinear(self.benders.upperbounds[probnumber][0,l,k])*self.model.getBendersVar(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k].name],self.benders)
+                    uAx-=subprob.getDualsolLinear(self.benders.lowerbounds[probnumber][0,l,k])*self.model.getBendersVar(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k].name],self.benders)
+                    uAx+=subprob.getDualsolLinear(self.benders.c_bound_on_location[probnumber][l,k]) * self.model.getBendersVar(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k].name],self.benders)
+                    
+                    uAxetoile+=subprob.getDualsolLinear(self.benders.upperbounds[probnumber][0,l,k])*self.model.getVal(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k].name])
+                    uAxetoile-=subprob.getDualsolLinear(self.benders.lowerbounds[probnumber][0,l,k])*self.model.getVal(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k].name])
+                    uAxetoile+=subprob.getDualsolLinear(self.benders.c_bound_on_location[probnumber][l,k])*self.model.getVal(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k].name])
+
+                elif(self.benders.varT=="I"):
+                    
+                    for i in range(self.eta[k-1]):
+                        uAx+=subprob.getDualsolLinear(self.benders.upperbounds[probnumber][0,l,k,i])*self.model.getBendersVar(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k,i].name],self.benders)
+                        uAx-=subprob.getDualsolLinear(self.benders.lowerbounds[probnumber][0,l,k,i])*self.model.getBendersVar(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k,i].name],self.benders)
+                        uAxetoile+=subprob.getDualsolLinear(self.benders.upperbounds[probnumber][0,l,k,i])*self.model.getVal(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k,i].name])
+                        uAxetoile-=subprob.getDualsolLinear(self.benders.lowerbounds[probnumber][0,l,k,i])*self.model.getVal(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k,i].name])
+                        
+                    uAx+=quicksum(subprob.getDualsolLinear(self.benders.c_bound_on_location[probnumber][l,k]) * self.model.getBendersVar(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k,i].name],self.benders) for i in range(self.benders.eta[k-1]))
+                    
+                    
+                    uAxetoile+=sum(subprob.getDualsolLinear(self.benders.c_bound_on_location[probnumber][l,k])*self.model.getVal(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k,i].name]) for i in range(self.benders.eta[k-1]))
                 
-                #uAx+=subprob.getDualsolLinear(self.benders.upperbounds[probnumber][0,l,k])*self.model.getVal(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k].name])
-                #uAx+=-subprob.getDualsolLinear(self.benders.lowerbounds[probnumber][0,l,k])*self.model.getVal(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k].name])
-                uAx+=subprob.getDualsolLinear(self.benders.c_bound_on_location[probnumber][l,k])*self.model.getVal(self.benders.subproblems[probnumber].data[self.benders.x_vars[probnumber][0,l,k].name])
-
-       
-
-        c = self.model.addCons(linExpr + Ax >= subprob.getObjVal()) ###subprob.getObjVal() )   # subprob.getObjVal()-uAx)
-        #print_Cons(linExpr + Ax  >= optSub)
-        self.model.writeProblem(trans=True)
+#        print("subprob : " + str(subprob.getObjVal()))
+#        print("uAx : " + str(uAx))
+#        print()
+        #time.sleep(1)
+        print(uAxetoile)
+        c = self.model.addCons(linExpr >= subprob.getObjVal() + uAxetoile -uAx ) ###subprob.getObjVal() )   # subprob.getObjVal()-uAx)
+        
+        print_Cons(linExpr  >= subprob.getObjVal() + uAxetoile -uAx )
+        #self.model.writeProblem(trans=True)
         
         return {"result" : SCIP_RESULT.CONSADDED}
         
